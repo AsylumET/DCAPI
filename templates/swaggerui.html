@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>API Docs</title>
+  <link rel="stylesheet" type="text/css" href="{{ swagger_static_url }}/swagger-ui.css">
+  <link rel="icon" type="image/png" href="{{ swagger_static_url }}/favicon-32x32.png" sizes="32x32" />
+  <script src="{{ swagger_static_url }}/swagger-ui-bundle.js"></script>
+  <script src="{{ swagger_static_url }}/swagger-ui-standalone-preset.js"></script>
+</head>
+<body>tt
+  <div id="swagger-ui"></div>
+  <script>
+    const storedKey = localStorage.getItem("X-API-Key");
+
+    if (!storedKey) {
+      window.location.href = "/docs"; // redirect back to login
+    }
+
+    const ui = SwaggerUIBundle({
+      url: "/apispec_1.json",
+      dom_id: '#swagger-ui',
+      presets: [
+        SwaggerUIBundle.presets.apis,
+        SwaggerUIStandalonePreset
+      ],
+      layout: "StandaloneLayout",
+      requestInterceptor: function (req) {
+        if (storedKey) {
+          req.headers['X-API-Key'] = storedKey;
+        }
+        return req;
+      }
+    });
+  </script>
+</body>
+</html>

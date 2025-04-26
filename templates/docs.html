@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Docs Login</title>
+    <script>
+        function storeApiKey() {
+            const key = document.getElementById("api_key").value;
+            if (key) {
+                localStorage.setItem("X-API-Key", key);
+                alert("API key stored. It will be used for your requests.");
+            }
+        }
+    </script>
+</head>
+<body>
+    <h2>API Authentication</h2>
+
+    {% if error is not none and error != ""  %}
+        <p style="color: red;">{{ error }}</p>
+    {% endif %}
+
+    {% if success is not none and success != ""  %}
+        <p style="color: green;">Authenticated successfully.</p>
+        <a href="/apidocs/">API Docs</a>
+        <script>
+            localStorage.setItem("X-API-Key", "{{ api_key }}");
+        </script>
+    {% endif %}
+
+    <form method="POST">
+        <label for="api_key">Enter API Key:</label><br>
+        <input type="text" id="api_key" name="api_key" required><br><br>
+        <button type="submit" onclick="storeApiKey()">Submit</button>
+    </form>
+</body>
+</html>
