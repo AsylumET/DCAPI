@@ -1,0 +1,8 @@
+flasgger==0.9.7.1
+Flask==3.1.0
+flask_babel==4.0.0
+Flask_Caching==2.3.0
+flask_limiter==3.12
+flask_sqlalchemy==3.1.1
+SQLAlchemy==2.0.31
+Werkzeug==3.1.3
