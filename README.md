@@ -12,7 +12,7 @@ Table of Contents
     • Security Considerations
     • Deployment Considerations
     • Use Cases
-
+    
 Key Features
 Dynamic CRUD Operations
     • Create: /create/<table> endpoint for single or bulk creation with validation and sanitization.
