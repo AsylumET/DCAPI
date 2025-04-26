@@ -1,0 +1,16 @@
+# Config files
+api_config.ini
+
+# Python cache
+__pycache__/
+*.pyc
+
+# VSCode workspace settings
+DCAPI.code-workspace
+
+# Git internal directory (this should not need to be listed because Git ignores its own folder automatically but sometimes it shows up anyway)
+.git/
+
+# System files
+*.DS_Store
+Thumbs.db
