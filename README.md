@@ -90,6 +90,9 @@ Example:
     • Read-only users monitor sensor outputs.
     • Bulk operations streamline large data uploads.
 
+Contributors:
+    All contributions will be attributed to the authors and that credit must remain intact in any derivative works or projects.
+
 License
 GNU Affero General Public License v3.0
 
