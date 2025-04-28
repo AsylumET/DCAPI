@@ -53,7 +53,7 @@ swagger_template = {
     "info": {
         "title": LazyString(lambda: "DCAPI"),
         "version": LazyString(lambda: "1.0"),
-        "description": LazyString(lambda: "API documentation"),
+        "description": LazyString(lambda: "A lightweight, secure, and versatile RESTful API designed to serve as the backbone for data management in the Demeter greenhouse management software and other software built around Aegis. Likely standing for \"Demeter Core API\" (though its creator's sleep-coding sessions leave the \"C\" with a hint of mystery), DCAPI provides a dynamic interface for performing Create, Read, Update, and Delete (CRUD) operations on any configured database table.\n\nBuilt with Flask, it supports both JSON and XML responses, fine-grained role-based access control (RBAC), and is optimized for deployment on resource-constrained Raspberry Pi devices in an intranet environment.\n\nWhether handling sensor data for temperature control or managing plant inventory, DCAPI delivers a flexible, production-ready solution for Demeter’s data needs."),
     },
 }
 
@@ -194,21 +194,58 @@ def get_allowed_columns(table):
     role = get_api_role()
     return ROLE_COLUMN_ACCESS.get(role, {}).get(table, [])
 
-def rows_to_xml(rows, table_name):
-    """Converts row dicts to XML."""
+def rows_to_xml(rows, table_name, column_format=None):
+    """Converts row dicts to XML with optional format change."""
     root = ET.Element(table_name)
-    for row in rows:
-        item = ET.SubElement(root, "record")
-        for col, val in row.items():
-            # Escape XML-special characters
-            safe_val = str(val).replace('&', '&').replace('<', '<').replace('>', '>').replace('"', '"').replace("'", '&apos;')
-            ET.SubElement(item, col).text = safe_val
+    
+    # If 'short' format is requested, use different XML structure
+    if column_format:
+        for col in rows:
+            ET.SubElement(root, 'column').text = escape_xml(col)
+
+    else:
+        for row in rows:
+            if isinstance(row, dict):
+                for col, val in row.items():
+                    if isinstance(val, list):
+                        sub_element = ET.SubElement(root, col)
+                        for item in val:
+                            ET.SubElement(sub_element, 'column').text = escape_xml(item)
+                    else:
+                        ET.SubElement(root, col).text = escape_xml(val)
+            elif isinstance(row, (list, tuple)):
+                for val in row:
+                    ET.SubElement(root, singularize(table_name[:-1])).text = escape_xml(val)
+            else:
+                ET.SubElement(root, singularize(table_name[:-1])).text = escape_xml(row)
+    
     return ET.tostring(root, encoding='utf8')
 
-def format_response(data, output_format, table_name):
+def escape_xml(val):
+    """Proper XML escaping."""
+    if val is None:
+        return ''
+    return str(val).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;').replace("'", '&apos;')
+
+def singularize(word):
+    """Converts simple English plurals to singular form."""
+    if word.endswith('ies'):
+        return word[:-3] + 'y' # categories -> category
+    elif word.endswith('ses') or word.endswith('xes') or word.endswith('zes'):
+        return word[:-2] # fixes -> fix, boxes -> box
+    elif word.endswith('s') and not word.endswith('ss'):
+        return word[:-1] # tables -> table, but not "glass" -> "glas"
+    else:
+        return word
+
+def format_response(data, output_format, table_name, column_format=None):
     """Formats response as JSON or XML."""
     if output_format == 'xml':
-        xml_data = rows_to_xml(data if isinstance(data, list) else [data], table_name)
+        if isinstance(data, dict):
+            data = [data]  # Wrap dicts
+        elif not isinstance(data, list):
+            data = [[data]]  # Wrap single values
+        xml_data = rows_to_xml(data, table_name, column_format)
         return Response(xml_data, mimetype='application/xml')
     return jsonify(data)
 
@@ -235,6 +272,14 @@ def load_table(table_name):
         TABLE_CACHE[table_name] = Table(ALLOWED_TABLES[table_name], metadata, autoload_with=db.engine, extend_existing=True)
 
     return TABLE_CACHE[table_name]
+
+INSPECTOR_CACHE = {}
+def get_inspector():
+    """Cache the inspector results."""
+    if 'inspector' not in INSPECTOR_CACHE:
+        INSPECTOR_CACHE['inspector'] = db.inspect(db.engine)
+
+    return INSPECTOR_CACHE['inspector']
 
 def validate_tables():
     """Validate table schemas at startup to catch configuration errors early."""
@@ -315,6 +360,143 @@ def check_api_key():
     api_logger.info(f"API key: {api_key} | Role: {role} | Path: {request.path} | Method: {request.method} | IP: {request.remote_addr}")
 
 # ──────── Routes ────────
+
+@app.route('/tables', defaults={'output_format': 'json'}, methods=['GET'])
+@app.route('/tables/<output_format>', methods=['GET'])
+@limiter.limit(rl_read)
+@cache.memoize(timeout=300)
+def list_tables(output_format):
+    """
+    List all table names from the database.
+    ---
+    parameters:
+      - name: output_format
+        in: path
+        type: string
+        required: false
+    responses:
+      200:
+          description: List of tables retrieved successfully
+    """
+    try:
+        table_names = [t for t in ALLOWED_TABLES.keys()]
+        return format_response(table_names, output_format, table_name="tables")
+    except DatabaseError as e:
+        api_logger.error(f"Database error during table list: {e}")
+        abort(500, description="Database connection error")
+    except Exception as e:
+        api_logger.error(f"Unexpected error during table list: {e}")
+        abort(500, description="Internal server error")
+
+@app.route('/columns/<table>', defaults={'output_format': 'json'}, methods=['GET'])
+@app.route('/columns/<table>/<output_format>', methods=['GET'])
+@limiter.limit(rl_read)
+@cache.memoize(timeout=300)
+def list_columns(table, output_format):
+    """
+    List columns for a specific table.
+    ---
+    parameters:
+      - name: table
+        in: path
+        type: string
+        required: true
+      - name: output_format
+        in: path
+        type: string
+        required: false
+    responses:
+      200:
+          description: List of columns retrieved successfully
+      404:
+          description: Table not found
+    """
+    try:
+        tbl = load_table(table)  # Enforces ALLOWED_TABLES
+        columns = sorted([col.name for col in tbl.columns])
+        return format_response(columns, output_format, table_name=f"columns_of_{table}", column_format=True)
+    except DatabaseError as e:
+        api_logger.error(f"Database error during column list: {e}")
+        abort(500, description="Database connection error")
+    except Exception as e:
+        api_logger.error(f"Unexpected error during column list: {e}")
+        abort(500, description="Internal server error")
+
+@app.route('/tables_with_columns', defaults={'output_format': 'json'}, methods=['GET'])
+@app.route('/tables_with_columns/<output_format>', methods=['GET'])
+@limiter.limit(rl_read)
+@cache.memoize(timeout=300)
+def list_tables_with_columns(output_format):
+    """
+    List all tables with their columns or list columns from multiple specific tables at once.
+    ---
+    parameters:
+      - name: tables
+        in: query
+        type: string
+        required: false
+        description: Comma-separated list of table names (optional).
+      - name: output_format
+        in: path
+        type: string
+        required: false
+        description: Desired output format (json, xml, etc.)
+    responses:
+      200:
+        description: Tables and columns retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                type: array
+                items:
+                  type: string
+              example:
+                users: ["id", "name", "email"]
+                sensors: ["id", "timestamp", "value"]
+      400:
+        description: Invalid table names
+      500:
+        description: Database or internal error
+    """
+    if ENV != 'production':
+        cache.delete_memoized(list_tables_with_columns)
+
+    try:
+        inspector = get_inspector()
+        tables_param = request.args.get('tables', None)
+        available_tables = inspector.get_table_names()
+
+        if tables_param:
+
+            tables = [t.strip() for t in tables_param.split(',') if t.strip()]
+            if not tables or any(not re.match(r'^[a-zA-Z0-9_]+$', t) for t in tables):
+                abort(400, description="Invalid table names")
+
+            tables = [t for t in tables if t in ALLOWED_TABLES]
+            tbl_name = "batch_columns"
+        else:
+            tables = list(ALLOWED_TABLES.keys())
+            tbl_name = "tables_with_columns"
+
+        result = {}
+        for table in tables:
+            if table not in available_tables:
+                result[table] = 'Table not found'
+            else:
+                tbl = load_table(table)
+                allowed_cols = get_allowed_columns(table)
+                columns = sorted(col.name for col in tbl.columns if col.name in allowed_cols)
+                result[table] = columns
+        return format_response(result, output_format, table_name=tbl_name)
+
+    except DatabaseError as e:
+        api_logger.error(f"Database error during tables_with_columns: {e}")
+        abort(500, description="Database connection error")
+    except Exception as e:
+        api_logger.error(f"Unexpected error during tables_with_columns: {e}")
+        abort(500, description="Internal server error")
 
 @app.route('/create/<table>', methods=['POST'])
 @limiter.limit(rl_create)
